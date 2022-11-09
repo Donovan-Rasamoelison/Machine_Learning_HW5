@@ -11,6 +11,7 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+Please click here for the: [Link to the github repository](https://github.com/Donovan-Rasamoelison/Machine_Learning_HW5)
 
 ```{r, message = F, warning = F}
 library(tidyverse)
