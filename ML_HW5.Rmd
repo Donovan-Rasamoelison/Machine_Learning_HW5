@@ -1,0 +1,177 @@
+---
+title: "ML_HW5"
+date: "2022-11-09"
+output: 
+  html_document:
+   toc: true
+   toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, message = F, warning = F}
+library(tidyverse)
+library(tidymodels)
+library(janitor)
+library(discrim)
+library(corrplot)
+library(klaR)
+library(glmnet)
+library(yardstick)
+
+set.seed(0)
+
+```
+
+
+# Coding questions
+
+## Question 1 - using clean_names() on pokemon data
+
+```{r, message = F, warning = F}
+pokemon <- read.csv("Pokemon.csv") %>% clean_names()
+```
+
+The clean_names() function renames the variables in the Pokemon data to be lower case and follow the snake case format. It can make referring to the variables easier.   
+
+## Question 2 - Bar chart for type_1
+
+```{r, message = F, warning = F}
+pokemon %>% ggplot(aes(y = fct_reorder(as.factor(type_1),type_1,.fun='length'))) +
+  geom_bar() +
+  ylab("Pokemon type") +
+  theme_classic()
+
+pokemon %>% count(fct_reorder(as.factor(type_1),type_1,.fun='length')) # looking at the number of types and the types with few observation
+
+pokemon_clean <- pokemon %>%
+  filter(type_1 %in% c("Bug","Fire","Grass","Normal","Water","Psychic")) %>% #filtering to only include selected types
+  mutate(across(c(type_1,legendary), ~ as.factor(.))) #making type_1 and legendary factor
+
+#checking results
+is.factor(pokemon_clean$type_1)
+is.factor(pokemon_clean$legendary)
+pokemon_clean %>% count(fct_reorder(as.factor(type_1),type_1,.fun='length')) 
+```
+
+There are 18 different classes of Pokemon. Flying class has very few observation, only 4. Fairy class also has very few observations (17)
+
+## Question 3 - Splitting the data and creating folds.
+
+```{r, message = F, warning = F}
+#Splitting the data
+pokemon_split <- initial_split(pokemon_clean, prop = 0.8, strata = "type_1")
+pokemon_clean_train <- training(pokemon_split)
+pokemon_clean_test  <- testing(pokemon_split)
+
+#Checking if the training and test sets have the appropriate number of observations.
+dim(pokemon_clean_train) #364 = this is 80% of 458
+dim(pokemon_clean_test) #94 = this is 20% of 458
+
+#V-fold cross validation (k=5)
+pokemon_clean_fold <- vfold_cv(pokemon_clean_train, v=5, strata = "type_1")
+
+```
+
+Stratifying over the outcome is necessary to have a balanced number of the outcome classes in the folds.
+
+
+## Question 4 - Setting up a recipe
+```{r, message = F, warning = F}
+pokemon_clean_recipe <- recipe(formula = type_1 ~ legendary + generation + sp_atk + attack + speed + defense + hp + sp_def, data = pokemon_clean_train) %>%
+  step_dummy(legendary, generation) %>%
+  step_center(all_predictors()) %>%
+  step_normalize(all_predictors())
+```
+
+
+## Question 5 - Setting model and workflow
+
+```{r, message = F, warning = F}
+pokemon_model <- multinom_reg(penalty = tune(), mixture = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("glmnet")
+
+pokemon_workflow <- workflow() %>%
+  add_recipe(pokemon_clean_recipe) %>%
+  add_model(pokemon_model)
+
+penalty_grid <- grid_regular(penalty(range = c(-5,5)), mixture(range = c(0,1)),levels = 10)
+```
+
+We will be fitting 100 models for the combination of each penalty and mixture. But on the folded data, we have 5 folds, so in total we will fit 500 models. 
+
+
+## Question 6 - 
+
+```{r, message = F, warning = F}
+tune_res <- tune_grid(pokemon_workflow, resamples = pokemon_clean_fold, grid = penalty_grid)
+autoplot(tune_res)
+```
+
+We can see that larger values of penalty and mixture do not produce a better accuracy and ROC AUC values.
+
+## Question 7 - Selecting the best model parameter and fitting on the test set
+
+```{r, message = F, warning = F}
+#Selecting the best parameters
+best_penalty <- select_best(tune_res, metric = "roc_auc")
+best_penalty
+
+#Fitting the model to the test data and evaluating its performance using accuracy measure
+pokemon_model_final <- finalize_workflow(pokemon_workflow,best_penalty)
+
+pokemon_model_final_fit <- fit(pokemon_model_final, data = pokemon_clean_train)
+
+#measuring accuracy
+augment(pokemon_model_final_fit, new_data = pokemon_clean_test) %>% accuracy(truth = type_1, estimate = .pred_class)
+
+```
+
+## Question 8 - 
+
+```{r, message = F, warning = F}
+#ROC AUC for the testing set
+augment(pokemon_model_final_fit, new_data = pokemon_clean_test) %>% roc_auc(truth = type_1, estimate = .pred_Bug:.pred_Water)
+
+#ROC AUC for each level of the outcome
+augment(pokemon_model_final_fit, new_data = pokemon_clean_test) %>% roc_curve(truth = type_1, estimate = .pred_Bug:.pred_Water) %>% autoplot()
+
+#heatmap of the confusion matrix
+augment(pokemon_model_final_fit, new_data = pokemon_clean_test) %>% conf_mat(truth = type_1, estimate = .pred_class) %>% autoplot(type = "heatmap")
+
+```
+
+The model is best at predicting normal while it's worse at predicting grass. 
+
+# 231 students only:
+
+## Question 9 
+```{r, message = F, warning = F}
+sample_curry <- c(rep(1,337),rep(0,464))
+means <- NULL
+
+for (i in 1:1000) {
+  means[i] <- mean(sample(sample_curry,replace=T)) #Sampling with replacement and computing the mean
+}
+  
+ggplot(aes(x = means), data = tibble(means)) +
+  geom_histogram()
+
+#mean
+mean(means)
+#Confidence interval
+c(quantile(means, 0.005), quantile(means, 0.995))
+
+```
+
+
+
+
+
+
+
+
